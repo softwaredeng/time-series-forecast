@@ -1,0 +1,167 @@
+%function [lengthvector,tree_pro]=TForest(data0,test,flag)
+clc;clear;
+
+%mex slideWin.cpp
+temp1 =what;
+dir0=temp1.path;
+dir1=[dir0 '\' 'dataset1\'];
+%mex slideWin.cpp
+%addpath(genpath([dir0 '/multicore_2010_03_10']));
+%addpath(genpath([root '/SLEP']));
+
+filename = dir(dir1);fileL=size(filename);fileL=fileL(1);
+
+alphaV = [1]; %[0.000001];
+
+factor = size(alphaV,2);
+
+nRows = (fileL-2)*factor;
+allForest=cell(fileL-2,2);
+allErr=cell(nRows,6);
+
+%fileL
+isOpen = matlabpool('size') > 0;
+if isOpen~=1 
+    matlabpool open 4
+end
+
+stdMean =[];
+counter=1;
+for alpha=alphaV
+    
+%for i= 3:fileL
+for i= 3:fileL
+    forest = [];
+    R=[];
+    str = filename(i).name;
+    str
+    sameIf1 = strcmp(str,'.');
+    sameIf2 = strcmp(str,'..');
+    if(sameIf1+sameIf2>0)%not a valid name
+        continue;
+    end
+ 
+    
+   testDir= [dir1 str '\' str '_TEST'];
+   trainDir= [dir1 str '\' str '_TRAIN'];
+   TEST = load(testDir); % Only these two lines need to be changed to test a different dataset. %
+   TRAIN= load(trainDir); % Only these two lines need to be changed to test a different dataset. %
+ 
+       
+    X=TRAIN;X(:,1)=[];
+    TL = size(TRAIN,2);
+    cls=TRAIN(:,1);
+    
+    minWin = 1;  maxWin = TL;
+    
+    ntree=500;
+    pre_l=1000000; %no limit on depth
+    num = 20;nVar=num;nMean=num;nSlope=num;%here nVar is substitute the second derivative, i.e. smoothness
+    
+    sampleModeWSZ = 1; %window size sample: 0: log2;  1: sqrt; 2: all
+    sampleModePos = 1; %position sample:              1: sqrt; 2: all
+    
+    tic;
+    forest = cell(ntree,1);      
+    %parfor: multicore computing. replace to "for" for single core
+    parfor itree=1:ntree
+        inx = randsample(size(X,1),ceil(size(X,1)*2/2),1);%1: with replacement; 0: without replacement  
+        depth=0;
+        [tree1] = TMakeTree(depth,pre_l,X(inx,:),cls(inx,:),nVar,nMean,nSlope,sampleModeWSZ,sampleModePos,alpha,minWin,maxWin);
+        forest{itree}=tree1;
+    end
+    trainT = toc;
+    
+    tic;
+    TEST1 = TEST;
+    clsTest=TEST1(:,1);
+    TEST1(:,1)=[];
+    
+    %---batch processing test cases
+    clsBatch=TReadForestBatchTest(forest,ntree,TEST1);
+    err = 1-sum((clsBatch-clsTest(:,1))==0)/size(TEST1,1);
+    testT = toc;
+    
+    if(size(alphaV,2)==1)allForest(counter,1)={str};allForest(counter,2)={forest};end
+    allErr(counter,1)={str};allErr(counter,2)={err};
+    allErr(counter,3)={trainT};allErr(counter,4)={testT};
+    allErr(counter,5)={alpha};allErr(counter,6)={i-2};%data number
+    % err
+    allErr
+    counter=counter+1
+end
+end
+
+allForest1 = allForest(1:20,:);
+allForest2 = allForest(21:45,:);
+allForest=[];
+
+a=cell2mat(allErr(:,2:end));
+b=(allErr(:,1));
+bUpper = upper(b);
+[discard inx] = sort(bUpper); 
+
+% d1: data set name; d2: error rates and time
+c=allErr;
+d = c(inx,:);
+d1 = d(:,1); 
+d2 = cell2mat(d(:,2:end));
+d3=d2; %round(d2.*1000)/1000;
+d4=d3(:,1)
+
+%
+d5 = d2; d5(:,4:end)=[];
+dlmwrite('output.txt', d5)
+
+matlabpool close 
+
+isOpen = matlabpool('size') > 0;
+if isOpen==1 
+    %matlabpool close 
+end
+
+%save('R3_Entrance_FullTree_WinRandom_Tiebreak_500')
+%save('R3_Entrope_FullTree_WinRandom_500')
+%save('R3_Entrance_FullTree_WinRandom_Tiebreak_500_V2')
+%save('R3_Entrance_FullTree_WinRandom')
+%save('R3_Entropy_FullTree_WinRandom')
+%matlabpool open 4
+
+%round2(d2,0.001) 
+
+%-----analyze different parameters
+stop;
+alphaV = [0,0.1,0.01,0.001,0.0001,0.00001,0.000001];
+betaV  = alphaV;
+
+eM = [];
+for datai = 1:20
+    eV = [];
+for alpha = betaV 
+    for beta =  alphaV      
+        temp1 = find(d5(:,2)==alpha & d5(:,3)==beta & d5(:,4)==datai);
+        eV = [eV d5(temp1,1)];
+    end
+end
+    eM = [eM;eV];
+end
+
+plot(eM','*-')
+plot(eM','*-')
+
+figure,hold on;
+for i = 1:size(eM,1)
+    plot(eM(i,:),'.-','Color',3);
+end
+
+mEM = mean(eM)
+plot(mean(eM))
+count=1;
+for alpha = alphaV
+    for beta = betaV
+        text(count-0.5,mEM(count),strcat(num2str(alpha),10,num2str(beta)), 'FontSize',10)
+        count=count+1;
+    end
+end
+%surf(alphaV,betaV,eM)
+%view(-35,45)
